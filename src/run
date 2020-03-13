@@ -1,0 +1,2 @@
+#!/bin/bash
+DISCORD_APP_AUTH_TOKEN=${DISCORD_APP_AUTH_TOKEN} exec punk_bot

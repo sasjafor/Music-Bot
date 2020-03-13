@@ -1,0 +1,10 @@
+node_modules
+package-lock.json
+test_run.sh
+debug_test_run.sh
+client_secret.json
+
+/target
+**/*.rs.bk
+test_functions.txt
+experimental_test_functions.txt
