@@ -1,49 +1,67 @@
-use VoiceManager;
-use lib::msg::check_msg;
-use serenity::client::Context;
-use serenity::model::channel::Message;
-use serenity::prelude::Mentionable;
-
-pub fn join_channel(ctx: &mut Context, msg: &Message) {
-    // check_msg(msg.reply(&ctx, "JOINING TEST!!!"));
-    // check_msg(msg.channel_id.say(&ctx.http, "START OF JOIN"));
-
-    let guild = match msg.guild(&ctx.cache) {
-        Some(guild) => guild,
-        None => {
-            check_msg(msg.channel_id.say(&ctx.http, "Groups and DMs not supported"));
-
-            return;
+use serenity::{
+    client::Context, 
+    model::{
+        id::{
+            ChannelId,
+            GuildId,
         }
-    };
-    // check_msg(msg.channel_id.say(&ctx.http, "AFTER GUILD"));
-
-    let guild_id = guild.read().id;
-
-    let channel_id = guild
-        .read()
-        .voice_states.get(&msg.author.id)
-        .and_then(|voice_state| voice_state.channel_id);
-
-
-    let connect_to = match channel_id {
-        Some(channel) => channel,
-        None => {
-            check_msg(msg.reply(&ctx, "Not in a voice channel"));
-
-            return;
-        }
-    };
-    // check_msg(msg.channel_id.say(&ctx.http, "AFTER CONNECT TO"));
-
-    let manager_lock = ctx.data.read().get::<VoiceManager>().cloned().expect("Expected VoiceManager in ShareMap.");
-    let mut manager = manager_lock.lock();
-
-    // check_msg(msg.channel_id.say(&ctx.http, "BEFORE MANAGER JOIN"));
-    if manager.join(guild_id, connect_to).is_some() {
-        check_msg(msg.channel_id.say(&ctx.http, &format!("Joined {}", connect_to.mention())));
-    } else {
-        check_msg(msg.channel_id.say(&ctx.http, "Error joining the channel"));
     }
-    // check_msg(msg.channel_id.say(&ctx.http, "END OF JOIN"));
+};
+
+use songbird::{error::JoinResult};
+use tracing::{error};
+
+pub async fn join_channel(ctx: &Context, channel_id: ChannelId, guild_id: GuildId) -> JoinResult<()> {
+    let manager = songbird::get(ctx).await
+        .expect("Songbird Voice client placed in at initialisation.").clone();
+
+    let handler_lock = manager.get_or_insert(songbird::id::GuildId(guild_id.0));
+    let mut handler = handler_lock.lock().await;
+
+    let songbird_channel_id = songbird::id::ChannelId(channel_id.0);
+    if handler.current_channel().is_none() || handler.current_channel().unwrap() != songbird_channel_id {
+        let handler_res = match handler.join(songbird_channel_id).await {
+            Ok(res) => res,
+            Err(err) => {
+                error!("Failed to send connect request for channel with id {} with err {}", channel_id, err);
+                return Err(err);
+            }
+        };
+        drop(handler);
+        let _ = match handler_res.await {
+            Ok(_res) => _res,
+            Err(err) => {
+                error!("Failed to connect to channel with id {} with err {}", channel_id, err);
+                return Err(err);
+            }
+        };
+    }
+    
+    return Ok(());
+}
+
+pub async fn disconnect_channel(ctx: &Context, guild_id: GuildId) -> JoinResult<()> {
+    let manager = songbird::get(&ctx).await
+        .expect("Songbird Voice client placed in at initialisation.").clone();
+
+    let handler_lock = manager.get(guild_id);
+
+    if handler_lock.is_some() {
+        let handler_tmp = handler_lock.unwrap();
+        let mut handler = handler_tmp.lock().await;
+
+        let self_channel_id = handler.current_channel();
+
+        if self_channel_id.is_some() {                        
+            let _ = match handler.leave().await {
+                Ok(_res) => _res,
+                Err(err) => {
+                    error!("Failed to leave voice channel");
+                    return Err(err);
+                }
+            };
+        }
+    }
+
+    return Ok(());
 }

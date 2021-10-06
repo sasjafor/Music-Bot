@@ -1,51 +1,53 @@
-FROM rust:1.40
-
-# Install rust toolchain
-RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
-
-# Setup apt, install package dependencies and create /config
-# RUN echo "deb http://ftp.debian.org/debian jessie-backports main" >> /etc/apt/sources.list && \
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends  ffmpeg \
-                                                lame \
-                                                libopus0 \
-                                                libssl-dev \
-                                                vorbis-tools \
-                                                && \
-    mkdir /config
-
+FROM rust:1.55 as builder
 
 # Create empty shell project
-RUN USER=root cargo new --bin punk_bot
+RUN USER=root cargo new --bin music_bot
 
-WORKDIR /punk_bot
+WORKDIR /music_bot
 
 # Copy manifest
 COPY ./Cargo.toml ./Cargo.toml
 
 # Build dependencies
-RUN cargo build --release
+RUN RUSTFLAGS='-C link-arg=-s' cargo build --release
+
 RUN rm src/*.rs
+
+ADD . ./
+
+# Build for release
+RUN rm ./target/release/deps/music_bot*
+RUN RUSTFLAGS='-C link-arg=-s' cargo build --release
+
+FROM debian:buster-slim
 
 # Set log level
 ENV RUST_LOG warn
 
+# Setup apt, install package dependencies and create /config
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends  ca-certificates \
+                                                ffmpeg \
+                                                lame \
+                                                libopus0 \
+                                                libssl-dev \
+                                                python \
+                                                vorbis-tools \
+                                                && \
+    mkdir /config
+
 # Copy run script
 COPY src/run /bin
 
-# Copy source tree
-COPY ./src ./src
-
-# Build for release
-RUN rm ./target/release/deps/punk_bot*
-RUN cargo build --release
-
 # Copy executable
-RUN mv ./target/release/punk_bot /bin && \
-    rm -rf /punk_bot
+COPY --from=builder /music_bot/target/release/music_bot /bin
 
 WORKDIR /
 
-# EXPOSE 8080
+# Install youtube-dl
+ADD https://yt-dl.org/downloads/latest/youtube-dl /usr/local/bin/
+RUN chmod a+rx /usr/local/bin/youtube-dl
+
+# Set run command
 VOLUME /config
 CMD ["run"]

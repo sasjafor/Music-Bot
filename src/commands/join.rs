@@ -1,6 +1,6 @@
 use serenity::{
     framework::standard::{
-        Args, 
+        Args,
         CommandResult,
         macros::command,
     },
@@ -10,25 +10,25 @@ use serenity::{
     },
     model::channel::Message,
 };
-use lib::msg::check_msg;
-use VoiceManager;
+use crate::lib::{
+    helper::join_channel,
+    msg::check_msg
+};
 
 #[command]
 #[aliases("summon")]
-pub fn join(ctx: &mut Context, msg: &Message, _args: Args) -> CommandResult {
-    let guild = match msg.guild(&ctx.cache) {
+pub async fn join(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
+    let guild = match msg.guild(&ctx).await {
         Some(guild) => guild,
         None => {
-            check_msg(msg.channel_id.say(&ctx.http, "Groups and DMs not supported"));
-
+            check_msg(msg.channel_id.say(&ctx, "Groups and DMs not supported").await);
             return Ok(());
         }
     };
 
-    let guild_id = guild.read().id;
+    let guild_id = guild.id;
 
     let channel_id = guild
-        .read()
         .voice_states.get(&msg.author.id)
         .and_then(|voice_state| voice_state.channel_id);
 
@@ -36,18 +36,20 @@ pub fn join(ctx: &mut Context, msg: &Message, _args: Args) -> CommandResult {
     let connect_to = match channel_id {
         Some(channel) => channel,
         None => {
-            check_msg(msg.reply(&ctx, "Not in a voice channel"));
-
+            check_msg(msg.reply(&ctx.http, "Not in a voice channel").await);
             return Ok(());
         }
     };
 
-    let manager_lock = ctx.data.read().get::<VoiceManager>().cloned().expect("Expected VoiceManager in ShareMap.");
-    let mut manager = manager_lock.lock();
+    let _ = match join_channel(ctx, connect_to, guild_id).await {
+        Ok(_res) => _res,
+        Err(_err) => {
+            check_msg(msg.channel_id.say(&ctx, &format!("Failed to join {}", connect_to.mention())).await);
+            return Ok(());
+        }
+    };
 
-    manager.join(guild_id, connect_to);
-
-    check_msg(msg.channel_id.say(&ctx.http, &format!("Joined {}", connect_to.mention())));
+    check_msg(msg.channel_id.say(&ctx, &format!("Joined {}", connect_to.mention())).await);
 
     Ok(())
 }

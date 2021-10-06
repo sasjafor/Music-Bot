@@ -1,5 +1,6 @@
 use serenity::{
     framework::standard::{
+        Args,
         CommandResult,
         macros::command,
     },
@@ -8,32 +9,34 @@ use serenity::{
     },
     model::channel::Message,
 };
-use lib::msg::check_msg;
-use VoiceManager;
+use crate::lib::{
+    helper::disconnect_channel,
+    msg::check_msg
+};
 
 #[command]
 #[aliases("leave")]
-fn disconnect(ctx: &mut Context, msg: &Message) -> CommandResult {
-    let guild_id = match ctx.cache.read().guild_channel(msg.channel_id) {
-        Some(channel) => channel.read().guild_id,
+pub async fn disconnect(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
+    let guild_id = match ctx.cache.guild_channel(msg.channel_id).await {
+        Some(channel) => channel.guild_id,
         None => {
-            check_msg(msg.channel_id.say(&ctx.http, "Groups and DMs not supported"));
-
+            check_msg(msg.channel_id.say(&ctx.http, "Groups and DMs not supported").await);
+        
             return Ok(());
         },
     };
 
-    let manager_lock = ctx.data.read().get::<VoiceManager>().cloned().expect("Expected VoiceManager in ShareMap.");
-    let mut manager = manager_lock.lock();
-    let has_handler = manager.get(guild_id).is_some();
+    let _ = match disconnect_channel(&ctx, guild_id).await {
+        Ok(_res) => _res,
+        Err(_err) => {
+            check_msg(msg.reply(&ctx, "Not in a voice channel").await);
+            return Ok(());
+        }
+    };
 
-    if has_handler {
-        manager.remove(guild_id);
 
-        check_msg(msg.channel_id.say(&ctx.http, "Left voice channel"));
-    } else {
-        check_msg(msg.reply(&ctx, "Not in a voice channel"));
-    }
+
+    check_msg(msg.channel_id.say(&ctx.http, "Left voice channel").await);
 
     Ok(())
 }
